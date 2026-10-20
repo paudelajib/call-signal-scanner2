@@ -29,7 +29,7 @@ BROWSER_UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.3
 YAHOO_FALLBACK = {"DGS10": "^TNX", "DFF": "^IRX"}
 
 
-def _get(url: str, params: dict, tries: int = 3, timeout: int = 60) -> requests.Response:
+def _get(url: str, params: dict, tries: int = 2, timeout: int = 20) -> requests.Response:
     last = None
     for k in range(tries):
         try:
@@ -40,7 +40,8 @@ def _get(url: str, params: dict, tries: int = 3, timeout: int = 60) -> requests.
             last = RuntimeError(f"HTTP {r.status_code}")
         except requests.RequestException as e:
             last = e
-        time.sleep(2 * (k + 1))
+        if k + 1 < tries:
+            time.sleep(2)
     raise last or RuntimeError("no response")
 
 
@@ -57,16 +58,19 @@ def _fred(series_id: str, start: str) -> pd.Series:
 def _treasury_curve(kind: str, start: str) -> pd.DataFrame:
     """kind: 'daily_treasury_yield_curve' (nominal) or 'daily_treasury_real_yield_curve'."""
     frames = []
-    for year in range(pd.Timestamp(start).year, pd.Timestamp.now().year + 1):
+    years = list(range(pd.Timestamp(start).year, pd.Timestamp.now().year + 1))
+    for i, year in enumerate(reversed(years)):  # newest first; bail out fast if unreachable
         try:
             r = _get(TREASURY_URL.format(year=year),
                      {"type": kind, "field_tdr_date_value": year, "page": "", "_format": "csv"},
-                     tries=2)
+                     tries=1)
             df = pd.read_csv(io.StringIO(r.text))
             df.columns = [c.strip().lower() for c in df.columns]
             df.index = ns(pd.DatetimeIndex(pd.to_datetime(df["date"], format="mixed")))
             frames.append(df.drop(columns=["date"]).apply(pd.to_numeric, errors="coerce"))
         except Exception:
+            if i == 0:  # the current year failed: the site is unreachable, don't try 12 more
+                break
             continue
     if not frames:
         raise RuntimeError("treasury.gov unreachable")
@@ -108,13 +112,18 @@ def update_macro(cfg: Dict, paths: Paths) -> Dict[str, str]:
     start = cfg["history"]["start"]
     cols, status = {}, {}
     treasury: Dict[str, pd.Series] | None = None
+    fred_down = False
     for sid in cfg["macro"]["fred_series"]:
-        try:
-            cols[sid] = _fred(sid, start)
-            status[sid] = "fred"
-            continue
-        except Exception as e:
-            err = e
+        err: Exception = RuntimeError("FRED unreachable")
+        if not fred_down:
+            try:
+                cols[sid] = _fred(sid, start)
+                status[sid] = "fred"
+                continue
+            except Exception as e:
+                err = e
+                if not isinstance(e, RuntimeError) or "HTTP" not in str(e):
+                    fred_down = True  # timeout / connection error: skip FRED for the rest
         if sid in ("DGS10", "DGS2", "T10YIE"):
             if treasury is None:
                 try:
