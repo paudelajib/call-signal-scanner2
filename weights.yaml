@@ -10,7 +10,7 @@ weights:
     vol_surge: 0.10        # unusual volume = attention / information arriving
     macd_hist: 0.10
     rel_sector_3m: 0.10
-    news_sentiment: 0.25
+    news_sentiment: 0.30   # headline sentiment (finance-aware scoring)
     rate_tilt: 0.05
     infl_tilt: 0.05
   medium:
@@ -20,7 +20,7 @@ weights:
     trend_50_200: 0.10
     near_52w_high: 0.15
     rel_sector_3m: 0.10
-    news_sentiment: 0.10
+    news_sentiment: 0.20
     pe_vs_sector: 0.05
     rate_tilt: 0.05
     infl_tilt: 0.05
@@ -32,3 +32,4 @@ weights:
     near_52w_high: 0.10
     rate_tilt: 0.10
     infl_tilt: 0.05
+    news_sentiment: 0.10   # modest until the stored news history can be backtested

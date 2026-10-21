@@ -48,6 +48,47 @@ def _norm_title(t: str) -> str:
     return re.sub(r"[^a-z0-9 ]", "", t.lower())[:90]
 
 
+# --------------------------------------------------------------------------- finance lexicon
+# Words that describe a company's field rather than good or bad news (drug, disease, product topics).
+FIN_NEUTRAL = {
+    "cancer", "cancers", "tumor", "tumors", "tumour", "tumours", "disease", "diseases", "obesity",
+    "diabetes", "infection", "infections", "virus", "viruses", "pain", "stroke", "heart", "death",
+    "deaths", "fatal", "addiction", "depression", "alzheimer", "alzheimer's", "hiv", "illness",
+    "sick", "injury", "injuries", "weapon", "weapons", "defense", "defence", "war", "warfare",
+    "gun", "guns", "attack", "attacks", "battle", "fight", "fighting", "killer", "crash",
+}
+# Market language VADER lacks (values on VADER's -4..+4 scale).
+FIN_LEXICON = {
+    "upgrade": 2.2, "upgrades": 2.2, "upgraded": 2.2, "downgrade": -2.2, "downgrades": -2.2,
+    "downgraded": -2.2, "outperform": 1.8, "outperforms": 1.8, "overweight": 1.2,
+    "underperform": -1.8, "underperforms": -1.8, "underweight": -1.2, "beats": 1.8, "tops": 1.2,
+    "misses": -1.8, "missed": -1.6, "surge": 2.0, "surges": 2.0, "surged": 2.0, "soar": 2.2,
+    "soars": 2.2, "soared": 2.2, "jumps": 1.6, "jumped": 1.6, "rallies": 1.6, "rally": 1.4,
+    "climbs": 1.2, "gains": 1.2, "plunge": -2.4, "plunges": -2.4, "plunged": -2.4,
+    "plummets": -2.6, "plummeted": -2.6, "tumbles": -2.2, "tumbled": -2.2, "slumps": -2.0,
+    "slumped": -2.0, "sinks": -1.8, "sank": -1.8, "drops": -1.4, "dropped": -1.4, "falls": -1.2,
+    "fell": -1.2, "slides": -1.4, "record": 1.0, "approval": 1.8, "approved": 1.8,
+    "approves": 1.8, "buyback": 1.4, "layoffs": -1.6, "recall": -1.8, "recalls": -1.8,
+    "probe": -1.4, "investigation": -1.4, "subpoena": -1.8, "bankruptcy": -3.0, "default": -2.0,
+    "delisting": -2.4, "halted": -1.6, "fraud": -3.0, "resigns": -1.2, "breakthrough": 2.2,
+}
+_PHRASES = [
+    # (pattern, token appended so VADER scores the direction)
+    (re.compile(r"\b(raise[sd]?|raising|lift(s|ed)?|boost(s|ed)?|hike[sd]?|increase[sd]?|up(s|ped)?)\b"
+                r".{0,40}\b(price target|target|guidance|outlook|forecast|dividend|estimates?)\b", re.I), "upgrade"),
+    (re.compile(r"\b(cut[s]?|lower(s|ed)?|slash(es|ed)?|reduce[sd]?|trim(s|med)?)\b"
+                r".{0,40}\b(price target|target|guidance|outlook|forecast|dividend|estimates?)\b", re.I), "downgrade"),
+    (re.compile(r"\bbeat(s)?\b.{0,25}\b(estimates?|expectations|forecasts?|consensus)\b", re.I), "beats"),
+    (re.compile(r"\bmiss(es|ed)?\b.{0,25}\b(estimates?|expectations|forecasts?|consensus)\b", re.I), "misses"),
+]
+
+
+def finance_rewrite(text: str) -> str:
+    """Append direction words for common market phrases ("raises price target" -> upgrade)."""
+    extra = [tok for pat, tok in _PHRASES if pat.search(text)]
+    return text + (" . " + " ".join(extra) if extra else "")
+
+
 # --------------------------------------------------------------------------- sentiment models
 class Sentiment:
     _inst = None
@@ -68,6 +109,12 @@ class Sentiment:
         if self.model == "vader":
             from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
             self._vader = SentimentIntensityAnalyzer()
+            # VADER is a general social-media lexicon: it reads topic words such as "cancer" as
+            # strongly negative and does not know market language. Neutralise the topic words and
+            # add finance terms so headlines are scored on what they say about the stock.
+            for w in FIN_NEUTRAL:
+                self._vader.lexicon.pop(w, None)
+            self._vader.lexicon.update(FIN_LEXICON)
 
     @classmethod
     def get(cls, model: str) -> "Sentiment":
@@ -87,7 +134,7 @@ class Sentiment:
                 d = {x["label"].lower(): x["score"] for x in r}
                 out.append(float(d.get("positive", 0) - d.get("negative", 0)))
             return out
-        return [float(self._vader.polarity_scores(t)["compound"]) for t in texts]
+        return [float(self._vader.polarity_scores(finance_rewrite(t))["compound"]) for t in texts]
 
 
 # --------------------------------------------------------------------------- sources

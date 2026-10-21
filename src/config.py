@@ -24,6 +24,8 @@ def load_config(path: Path = CONFIG_PATH) -> Dict[str, Any]:
         cfg = yaml.safe_load(f)
     if os.getenv("SCANNER_DATA_DIR"):  # used by tests / demos to point at another folder
         cfg["data_dir"] = os.environ["SCANNER_DATA_DIR"]
+    if os.getenv("SCANNER_NEWS_MODEL"):  # e.g. finbert on the server, vader on a laptop
+        cfg["news"]["model"] = os.environ["SCANNER_NEWS_MODEL"]
     return cfg
 
 

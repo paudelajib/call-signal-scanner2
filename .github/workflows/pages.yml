@@ -36,7 +36,17 @@ jobs:
           cache: pip
 
       - name: Install
-        run: pip install -r requirements.txt
+        run: |
+          pip install -r requirements.txt
+          # FinBERT (finance-tuned headline sentiment); CPU-only torch keeps the install small
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          pip install "transformers>=4.40"
+
+      - name: Restore FinBERT model
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/huggingface
+          key: hf-finbert-v1
 
       - name: Restore market data
         uses: actions/cache/restore@v4
@@ -48,6 +58,7 @@ jobs:
       - name: Refresh data and scores
         env:
           NEWSAPI_KEY: ${{ secrets.NEWSAPI_KEY }}
+          SCANNER_NEWS_MODEL: finbert
         run: python -m src.cli refresh
 
       - name: Backtest
