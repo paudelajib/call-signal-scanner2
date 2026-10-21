@@ -1,0 +1,82 @@
+# Publishes a read-only copy of the scanner to GitHub Pages.
+# Weekdays after the U.S. close: refresh data + re-score. Saturdays: also re-run the backtest.
+# Downloaded market data is kept between runs in the Actions cache (data/ is never committed).
+name: Publish live demo
+
+on:
+  schedule:
+    - cron: "30 22 * * 1-5"   # 22:30 UTC = 5:30/6:30 pm New York, after the close
+    - cron: "0 12 * * 6"      # Saturday: weekly backtest
+  workflow_dispatch:
+    inputs:
+      backtest:
+        description: "Also run the backtest"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install
+        run: pip install -r requirements.txt
+
+      - name: Restore market data
+        uses: actions/cache/restore@v4
+        with:
+          path: data
+          key: scanner-data-${{ github.run_id }}
+          restore-keys: scanner-data-
+
+      - name: Refresh data and scores
+        env:
+          NEWSAPI_KEY: ${{ secrets.NEWSAPI_KEY }}
+        run: python -m src.cli refresh
+
+      - name: Backtest
+        if: >-
+          github.event.schedule == '0 12 * * 6' ||
+          inputs.backtest ||
+          hashFiles('data/backtest/results.json') == ''
+        run: python -m src.cli backtest
+
+      - name: Save market data
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: data
+          key: scanner-data-${{ github.run_id }}
+
+      - name: Export static site
+        run: python scripts/export_static.py --out site
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

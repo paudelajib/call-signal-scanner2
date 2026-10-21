@@ -245,3 +245,7 @@ table.wt { border-collapse: collapse; width: 100%; background: var(--surface); }
   .crow { grid-template-columns: 110px 1fr 46px; }
   .panel-body { padding: 12px 16px 40px; }
 }
+
+/* read-only static demo banner */
+.demo-note{margin:0 0 12px;padding:8px 12px;border:1px solid var(--line);border-radius:8px;font-size:13px;color:var(--faint)}
+.demo-note a{color:inherit;text-decoration:underline}

@@ -1,7 +1,27 @@
 /* Signal Scanner front end - vanilla JS, Plotly for charts. */
 const $ = (s, el = document) => el.querySelector(s);
 const $$ = (s, el = document) => [...el.querySelectorAll(s)];
+/* Read-only static build (GitHub Pages): GET calls map to pre-exported JSON files. */
+const STATIC = !!window.STATIC_SITE;
+const staticUrl = url => {
+  const u = new URL(url, "http://x");
+  if (u.pathname === "/api/ranking") return `api/ranking_${u.searchParams.get("horizon") || "medium"}.json`;
+  if (u.pathname.startsWith("/api/stock/")) return `api/stock/${decodeURIComponent(u.pathname.slice(11)).trim().toUpperCase().replace(".", "-")}.json`;
+  return u.pathname.replace(/^\//, "") + ".json";
+};
 const api = async (url, opts) => {
+  if (STATIC) {
+    if (opts && opts.method && opts.method !== "GET") throw new Error("Read-only demo: data updates automatically after each market close.");
+    if (url.startsWith("/api/jobs")) return { refresh: { running: false }, backtest: { running: false } };
+    let r = await fetch(staticUrl(url));
+    if (!r.ok && url.startsWith("/api/stock/")) {
+      const q = decodeURIComponent(url.slice(11)).trim().toLowerCase();
+      const hit = (state.rows || []).find(x => (x.name || "").toLowerCase().includes(q));
+      if (hit) r = await fetch(staticUrl("/api/stock/" + hit.ticker));
+    }
+    if (!r.ok) throw new Error(url.startsWith("/api/stock/") ? "That stock isn't in the S&P 500 list this scanner tracks." : `Couldn't load data (${r.status})`);
+    return r.json();
+  }
   const r = await fetch(url, opts);
   const j = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error(j.error || `Request failed (${r.status})`);
@@ -304,6 +324,7 @@ function renderStock(d) {
       <div style="max-height:320px;overflow:auto"><table class="mini"><thead><tr><th class="l">Ticker</th><th class="l">Name</th><th>P/E</th><th>Fwd P/E</th><th>6M score</th></tr></thead><tbody>${peersHtml}</tbody></table></div></div>
   </div>`;
   $(".close", panel).onclick = closePanel;
+  if (STATIC) $("#newsNow").hidden = true;
   $("#newsNow").onclick = async e => {
     e.target.disabled = true; e.target.textContent = "Fetching…";
     try { await api("/api/news/" + d.ticker, { method: "POST" }); toast("Headlines updated"); openStock(d.ticker); loadRanking(); }
@@ -391,6 +412,7 @@ async function loadBacktest() {
 function renderBacktest() {
   const b = state.bt, body = $("#btBody");
   if (!b || !b.horizons) {
+    if (STATIC) { body.innerHTML = `<div class="empty"><h2>Backtest results coming soon</h2><p>The walk-forward backtest is re-run every weekend and will appear here.</p></div>`; return; }
     body.innerHTML = `<div class="empty"><h2>No backtest yet</h2><p>Run it after the first data refresh. It replays every week since ${esc("2016")} using only data available at the time, so you can see whether each horizon's score actually ranked winners above losers before you rely on it.</p></div>`;
     return;
   }
@@ -450,6 +472,7 @@ function renderWeights(w) {
       ${ic == null ? "" : `<span class="ic">backtest IC <span class="${cls(ic) === "p" ? "up" : "down"}">${signed(ic, 3)}</span></span>`}</td>`;
   }).join("")}</tr>`).join("");
   $("#wTable").innerHTML = head + `<tbody>${rows}</tbody>`;
+  if (STATIC) $$("#wTable input").forEach(i => i.disabled = true);
 }
 function readWeights() {
   const w = { short: {}, medium: {}, long: {} };
@@ -480,12 +503,21 @@ $$(".tab").forEach(t => t.onclick = () => {
 });
 
 (async function boot() {
+  if (STATIC) {
+    ["#refreshBtn", "#btRun", ".wt-actions"].forEach(sel => { const el = $(sel); if (el) el.hidden = true; });
+    $$("#wTable").forEach(t => t.classList.add("readonly"));
+    const note = document.createElement("div");
+    note.className = "demo-note";
+    note.innerHTML = `Read-only demo, updated automatically after each U.S. market close. Scores rank S&amp;P 500 stocks against each other; for information only, not investment advice. <a href="https://github.com/paudelajib/call-signal-scanner2" target="_blank" rel="noopener">Source &amp; methodology</a>`;
+    document.querySelector("main").prepend(note);
+  }
   try {
     await loadMeta();
     await loadRanking();
     loadWeights().catch(() => {});
     pollJobs();
   } catch (e) {
+    if (STATIC) { $("#rankingBody").innerHTML = `<div class="empty"><h2>Data is being updated</h2><p>${esc(e.message)}. Please try again in a few minutes.</p></div>`; return; }
     $("#rankingBody").innerHTML = `<div class="empty"><h2>Can't reach the scanner server</h2><p>${esc(e.message)}. Start it with <b>python app.py</b> and reload this page.</p></div>`;
   }
 })();

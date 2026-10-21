@@ -10,6 +10,11 @@ A local web app that ranks all S&P 500 stocks by three **buy scores from −1 to
 
 Everything runs on **real daily market data**: prices from Yahoo Finance, yields and breakeven inflation from FRED, P/E history from Yahoo's quarterly valuation tables, and headlines from Google News, Yahoo and (optionally) NewsAPI. Nothing is simulated. The synthetic data in `tests/` exists only to check that the code runs.
 
+## Live demo
+
+A read-only copy updates automatically after each U.S. market close: **https://paudelajib.github.io/call-signal-scanner2/**
+(built by `.github/workflows/pages.yml` with `scripts/export_static.py`; Refresh / weights editing are local-only).
+
 ## Quick start
 
 ```bash
