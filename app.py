@@ -329,12 +329,50 @@ def backtest_get():
     return jsonify(load_backtest(paths) or {})
 
 
+# --------------------------------------------------------------------------- auto refresh
+def expected_last_session(now_et: Optional[pd.Timestamp] = None) -> pd.Timestamp:
+    """Date of the most recent US session whose daily bar should be final by now
+    (weekday and at least 16:20 New York time; holidays just cause a harmless retry)."""
+    now_et = now_et or pd.Timestamp.now(tz="America/New_York")
+    d = now_et.normalize().tz_localize(None)
+    if not (d.weekday() < 5 and now_et.hour * 60 + now_et.minute >= 16 * 60 + 20):
+        d -= pd.Timedelta(days=1)
+    while d.weekday() >= 5:
+        d -= pd.Timedelta(days=1)
+    return d
+
+
+def _auto_refresh_loop(check_every: int = 300, retry_minutes: int = 45):
+    last_try: Optional[float] = None
+    while True:
+        try:
+            _, paths = ctx()
+            st = paths.read_state()
+            last_bar = pd.Timestamp(st["last_bar"]) if st.get("last_bar") else None
+            want = expected_last_session()
+            stale = last_bar is None or last_bar < want
+            due = last_try is None or time.time() - last_try > retry_minutes * 60
+            if stale and due and not JOBS["refresh"].snapshot()["running"]:
+                print(f"[auto] data ends {last_bar.date() if last_bar is not None else None}, "
+                      f"expected {want.date()} -> refreshing", flush=True)
+                last_try = time.time()
+                JOBS["refresh"].start(engine.run_refresh)
+        except Exception:
+            traceback.print_exc()
+        time.sleep(check_every)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--port", type=int, default=8050)
     ap.add_argument("--host", default="127.0.0.1")
+    ap.add_argument("--no-auto", action="store_true",
+                    help="don't refresh automatically after the US market close")
     a = ap.parse_args()
-    print(f"Call Signal Scanner running at http://{a.host}:{a.port}")
+    if not a.no_auto:
+        threading.Thread(target=_auto_refresh_loop, daemon=True).start()
+    print(f"Call Signal Scanner running at http://{a.host}:{a.port}"
+          + ("" if a.no_auto else "  (auto-refresh after the US close while this is running)"))
     app.run(host=a.host, port=a.port, debug=False, threaded=True)
 
 
